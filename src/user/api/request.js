@@ -17,13 +17,10 @@ if (API_BASE_URL.startsWith('http') && !API_BASE_URL.endsWith('/api')) {
 export { API_BASE_URL }
 
 /**
- * 通用 API 請求函數（使用 Authorization header 認證，不使用 Cookie）
+ * 從多個來源讀取 token 和 userId（統一認證資料讀取邏輯）
+ * @returns {{ token: string | null, userId: number | null }}
  */
-export async function apiRequest(url, options = {}) {
-    const headers = {
-        'Content-Type': 'application/json',
-    }
-
+function getAuthData() {
     // 從 localStorage 讀取 token 和 userId（與 user 主頁同步）
     let token = localStorage.getItem('token')
     let userId = null
@@ -55,7 +52,8 @@ export async function apiRequest(url, options = {}) {
             console.warn('從 Pinia 持久化數據讀取失敗:', error)
         }
     }
-    // ⭐ 新增：嘗試從前台使用者 Pinia（key: "pinia-user"）讀取
+
+    // 嘗試從前台使用者 Pinia（key: "pinia-user"）讀取
     try {
         if (!userId || !token) {
             let piniaUserData =
@@ -96,6 +94,58 @@ export async function apiRequest(url, options = {}) {
         }
     }
 
+    return { token, userId }
+}
+
+/**
+ * 根據 token 和 userId 生成認證 headers
+ * @param {string | null} token - JWT token
+ * @param {number | null} userId - 用戶 ID
+ * @param {boolean} enableDebugLog - 是否啟用調試日誌（預設為 true）
+ * @returns {Object} 包含認證資訊的 headers 物件
+ */
+function getAuthHeaders(token, userId, enableDebugLog = true) {
+    const headers = {}
+
+    // 如果 token 存在，添加到 Authorization header
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+    } else if (enableDebugLog && import.meta.env.DEV) {
+        // 調試：如果沒有 token，記錄警告
+        console.warn('API 請求缺少 token，可能導致 401 錯誤')
+        console.warn('localStorage token:', localStorage.getItem('token'))
+        console.warn('localStorage hoUser:', localStorage.getItem('hoUser'))
+    }
+
+    // 如果 userId 存在，添加到 userId header（後端直接從 header 讀取）
+    if (userId) {
+        headers['userId'] = String(userId)
+        if (enableDebugLog && import.meta.env.DEV) {
+            // 調試：確認 userId 已設置
+            console.log('API 請求 - userId header:', userId)
+        }
+    } else if (enableDebugLog && import.meta.env.DEV) {
+        // 調試：如果沒有 userId，記錄警告
+        console.warn('API 請求缺少 userId，後端可能無法識別用戶')
+        console.warn('sessionStorage hoUser:', sessionStorage.getItem('hoUser'))
+        console.warn('localStorage hoUser:', localStorage.getItem('hoUser'))
+        console.warn('localStorage userId:', localStorage.getItem('userId'))
+    }
+
+    return headers
+}
+
+/**
+ * 通用 API 請求函數（使用 Authorization header 認證，不使用 Cookie）
+ */
+export async function apiRequest(url, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json',
+    }
+
+    // 讀取認證資料
+    const { token, userId } = getAuthData()
+
     // 調試信息（僅在開發模式，且只在首次請求或 token 變化時輸出）
     if (import.meta.env.DEV) {
         // 只在首次請求或 token 變化時輸出，避免日誌過於頻繁
@@ -107,34 +157,9 @@ export async function apiRequest(url, options = {}) {
         // URL 信息只在錯誤時輸出，正常請求不輸出
     }
 
-    // 如果 token 存在，添加到 Authorization header
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-    } else {
-        // 調試：如果沒有 token，記錄警告
-        if (import.meta.env.DEV) {
-            console.warn('API 請求缺少 token，可能導致 401 錯誤')
-            console.warn('localStorage token:', localStorage.getItem('token'))
-            console.warn('localStorage hoUser:', localStorage.getItem('hoUser'))
-        }
-    }
-
-    // 如果 userId 存在，添加到 userId header（後端直接從 header 讀取）
-    if (userId) {
-        headers['userId'] = String(userId)
-        // 調試：確認 userId 已設置
-        if (import.meta.env.DEV) {
-            console.log('API 請求 - userId header:', userId)
-        }
-    } else {
-        // 調試：如果沒有 userId，記錄警告
-        if (import.meta.env.DEV) {
-            console.warn('API 請求缺少 userId，後端可能無法識別用戶')
-            console.warn('sessionStorage hoUser:', sessionStorage.getItem('hoUser'))
-            console.warn('localStorage hoUser:', localStorage.getItem('hoUser'))
-            console.warn('localStorage userId:', localStorage.getItem('userId'))
-        }
-    }
+    // 添加認證 headers
+    const authHeaders = getAuthHeaders(token, userId, true)
+    Object.assign(headers, authHeaders)
 
     const defaultOptions = {
         headers,
@@ -246,52 +271,11 @@ export async function apiRequest(url, options = {}) {
  * @returns {Promise} 上傳結果
  */
 export async function apiUpload(url, formData, options = {}) {
-    // 從 localStorage 讀取 token 和 userId
-    let token = localStorage.getItem('token')
-    let userId = null
+    // 讀取認證資料
+    const { token, userId } = getAuthData()
 
-    // 嘗試從 Pinia 持久化數據讀取
-    try {
-        let hoUserData = sessionStorage.getItem('hoUser')
-        if (!hoUserData) {
-            hoUserData = localStorage.getItem('hoUser')
-        }
-
-        if (hoUserData) {
-            const parsed = JSON.parse(hoUserData)
-            if (parsed?.token && !token) {
-                token = parsed.token
-                localStorage.setItem('token', token)
-            }
-            if (parsed?.userId) {
-                userId = parsed.userId
-            }
-        }
-    } catch (error) {
-        if (import.meta.env.DEV) {
-            console.warn('從 Pinia 持久化數據讀取失敗:', error)
-        }
-    }
-
-    // 如果還是沒有 userId，嘗試從 localStorage 直接讀取
-    if (!userId) {
-        const storedUserId = localStorage.getItem('userId')
-        if (storedUserId) {
-            userId = parseInt(storedUserId)
-        }
-    }
-
-    const headers = {}
-
-    // 添加 Authorization header
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-    }
-
-    // 添加 userId header
-    if (userId) {
-        headers['userId'] = String(userId)
-    }
+    // 添加認證 headers（上傳時不顯示調試日誌，避免干擾）
+    const headers = getAuthHeaders(token, userId, false)
 
     // 合併自定義 headers（注意：不要設置 Content-Type，讓瀏覽器自動設置，這樣才能正確處理 FormData）
     const config = {
