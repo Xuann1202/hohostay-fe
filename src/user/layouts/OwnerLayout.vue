@@ -1,7 +1,22 @@
 ﻿<template>
   <div class="hotel-management flex min-h-screen bg-background">
+    <!-- 手機版側邊欄遮罩（當側邊欄打開時顯示） -->
+    <div
+      v-if="showSidebar"
+      class="fixed inset-0 bg-black/50 z-40 lg:hidden"
+      @click="showSidebar = false"
+    ></div>
+
     <!-- 修改：側邊欄固定定位，不隨頁面滾動 - 與主內容區顏色一致 -->
-    <aside class="fixed left-0 top-0 h-screen w-64 border-r border-border bg-background flex flex-col">
+    <!-- 在小螢幕上默認隱藏，可以通過 showSidebar 控制顯示 -->
+    <aside
+      :class="[
+        'fixed left-0 top-0 h-screen w-64 border-r border-border bg-background flex flex-col z-50 transition-transform duration-300',
+        // 在小螢幕上：根據 showSidebar 狀態決定顯示/隱藏
+        // 在大螢幕上（lg以上）：始終顯示
+        showSidebar ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+      ]"
+    >
       <!-- 修改：頂部標題區域，顯示平台名稱 HoHoStay -->
       <div class="flex h-16 items-center gap-2 border-b border-border px-6 flex-shrink-0">
         <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/80 shadow-lg flex-shrink-0">
@@ -174,7 +189,21 @@
     </aside>
 
     <!-- 修改：主要內容區添加左邊距，避免被固定側邊欄遮擋 -->
-    <main class="flex-1 ml-64 overflow-auto">
+    <!-- 在小螢幕上沒有左邊距，在大螢幕上有左邊距 -->
+    <main class="flex-1 ml-0 lg:ml-64 overflow-auto">
+      <!-- 手機版側邊欄切換按鈕（在小螢幕上顯示） -->
+      <div class="lg:hidden fixed top-4 left-4 z-30">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-10 w-10 p-0 bg-background shadow-lg"
+          @click="showSidebar = !showSidebar"
+        >
+          <Menu v-if="!showSidebar" class="h-5 w-5" />
+          <X v-else class="h-5 w-5" />
+        </Button>
+      </div>
+
       <slot />
     </main>
   </div>
@@ -183,7 +212,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Building2, LogOut, Moon, Sun, Crown, Bed, Plus, Image, Settings, Wrench, ListChecks, Home } from 'lucide-vue-next'
+import { Building2, LogOut, Moon, Sun, Crown, Bed, Plus, Image, Settings, Wrench, ListChecks, Home, Menu, X } from 'lucide-vue-next'
 import Button from '@/user/components/ui/Button.vue'
 import { toast } from 'vue-sonner'
 import { getTheme, toggleTheme, initTheme } from '@/user/utils/theme'
@@ -195,6 +224,7 @@ const userEmail = ref('')
 const userId = ref(null)
 const isDark = ref(false)
 const hasAccess = ref(false) // 是否有權限訪問
+const showSidebar = ref(false) // 控制側邊欄顯示狀態（僅用於小螢幕）
 
 // 從路由中提取當前飯店 ID
 const currentHotelId = computed(() => {
